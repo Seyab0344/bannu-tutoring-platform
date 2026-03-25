@@ -128,12 +128,14 @@ else:
             with st.container(border=True):
                 st.markdown(f"### 📘 {b.subject} (Student: {b.student_phone})")
                 st.write(f"**When:** {b.lesson_date} at {b.lesson_time}")
+                # NEW: Show the payment ID to the tutor so they can verify it!
+                st.info(f"💰 **EasyPaisa TID:** `{getattr(b, 'tid', 'No TID provided')}`")
                 
                 if b.status == 'Pending':
-                    st.warning(f"Status: {b.status}")
+                    st.warning(f"Status: {b.status} (Awaiting Payment Verification)")
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("✅ Confirm", key=f"tutor_confirm_{b.id}"):
+                        if st.button("✅ Verify & Confirm", key=f"tutor_confirm_{b.id}"):
                             b.status = "Confirmed"
                             db.commit()
                             st.rerun()
@@ -143,7 +145,7 @@ else:
                             db.commit()
                             st.rerun()
                 else:
-                    st.info(f"Status: {b.status}")
+                    st.success(f"Status: {b.status}")
 
     # ==========================================
     # STUDENT VIEW - BOOKING & PERSONAL SCHEDULE
@@ -164,7 +166,7 @@ else:
                     st.write(f"**When:** {b.lesson_date} at {b.lesson_time}")
                     
                     if b.status == 'Pending':
-                        st.warning(f"Status: {b.status} (Waiting for Tutor)")
+                        st.warning(f"Status: {b.status} (Waiting for Tutor to verify payment)")
                     elif b.status == 'Confirmed':
                         st.success(f"Status: {b.status}")
                     else:
@@ -173,39 +175,61 @@ else:
         with tab2:
             st.header("Book a New Lesson")
             
-            # --- THE TUTOR SHOWCASE ---
-            st.subheader("👨‍🏫 Available Tutors")
-            tutors = db.query(models.User).filter(models.User.role == "tutor").all()
+            # --- NEW: THE TUTOR SEARCH BAR ---
+            st.subheader("👨‍🏫 Find a Tutor")
+            search_term = st.text_input("🔍 Search by subject, name, or specialization:", "")
+            
+            if search_term:
+                search_pattern = f"%{search_term}%"
+                tutors = db.query(models.User).filter(
+                    models.User.role == "tutor",
+                    (models.User.full_name.ilike(search_pattern)) | 
+                    (models.User.specialization.ilike(search_pattern))
+                ).all()
+            else:
+                tutors = db.query(models.User).filter(models.User.role == "tutor").all()
             
             if len(tutors) == 0:
-                st.info("No tutors available at the moment.")
+                st.info("No tutors found matching your search.")
             else:
                 for t in tutors:
                     with st.container(border=True):
                         st.markdown(f"### 🎓 {t.full_name}")
                         st.write(f"**Specialization:** {getattr(t, 'specialization', 'Not set')}")
                         st.write(f"**Experience:** {getattr(t, 'experience', 'Not set')}")
-                        st.info(f"**Bio:** {getattr(t, 'bio', 'No bio provided.')}")
+                        st.caption(f"**Bio:** {getattr(t, 'bio', 'No bio provided.')}")
             
             st.divider()
             
-            # --- BOOKING FORM ---
+            # --- NEW: BOOKING FORM WITH PAYMENT ---
+            st.subheader("📝 Request Lesson & Pay")
             with st.form("booking_form"):
                 new_subject = st.text_input("Subject (e.g. Linear Algebra)")
                 new_date = st.date_input("Lesson Date")
                 new_time = st.time_input("Lesson Time")
                 
-                if st.form_submit_button("Submit Booking"):
-                    new_booking = models.Booking(
-                        subject=new_subject,
-                        lesson_date=str(new_date),
-                        lesson_time=str(new_time),
-                        status="Pending",
-                        student_phone=st.session_state["user_phone"]
-                    )
-                    db.add(new_booking)
-                    db.commit()
-                    st.success("Lesson Request Sent!")
+                st.info("💳 **Payment Required: Rs. 1000 per lesson**\n\n"
+                        "Please send payment to **EasyPaisa: 03XX-XXXXXXX** before submitting.")
+                
+                transaction_id = st.text_input("Enter EasyPaisa/JazzCash Transaction ID (TID)")
+                
+                if st.form_submit_button("Submit Booking & Payment"):
+                    if len(transaction_id) < 5:
+                        st.error("❌ Please enter a valid Transaction ID to complete your booking.")
+                    elif not new_subject:
+                        st.error("❌ Please enter a subject.")
+                    else:
+                        new_booking = models.Booking(
+                            subject=new_subject,
+                            lesson_date=str(new_date),
+                            lesson_time=str(new_time),
+                            status="Pending",
+                            student_phone=st.session_state["user_phone"],
+                            tid=transaction_id  # <--- Saving the payment proof
+                        )
+                        db.add(new_booking)
+                        db.commit()
+                        st.success("✅ Booking Sent! The tutor will confirm once the TID is verified.")
 
 # Close the database session at the end of the script
 db.close()
