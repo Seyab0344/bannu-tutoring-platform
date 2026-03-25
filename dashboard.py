@@ -201,35 +201,47 @@ else:
             
             st.divider()
             
-            # --- NEW: BOOKING FORM WITH PAYMENT ---
-            st.subheader("📝 Request Lesson & Pay")
-            with st.form("booking_form"):
-                new_subject = st.text_input("Subject (e.g. Linear Algebra)")
-                new_date = st.date_input("Lesson Date")
-                new_time = st.time_input("Lesson Time")
-                
-                st.info("💳 **Payment Required: Rs. 1000 per lesson**\n\n"
-                        "Please send payment to **EasyPaisa: 03XX-XXXXXXX** before submitting.")
-                
-                transaction_id = st.text_input("Enter EasyPaisa/JazzCash Transaction ID (TID)")
-                
-                if st.form_submit_button("Submit Booking & Payment"):
-                    if len(transaction_id) < 5:
-                        st.error("❌ Please enter a valid Transaction ID to complete your booking.")
-                    elif not new_subject:
-                        st.error("❌ Please enter a subject.")
-                    else:
-                        new_booking = models.Booking(
-                            subject=new_subject,
-                            lesson_date=str(new_date),
-                            lesson_time=str(new_time),
-                            status="Pending",
-                            student_phone=st.session_state["user_phone"],
-                            tid=transaction_id  # <--- Saving the payment proof
-                        )
-                        db.add(new_booking)
-                        db.commit()
-                        st.success("✅ Booking Sent! The tutor will confirm once the TID is verified.")
+# --- UPDATED: BOOKING FORM WITH YOUR REAL PAYMENT DETAILS ---
+st.subheader("📝 Request Lesson & Pay")
+with st.form("booking_form"):
+    new_subject = st.text_input("Subject (e.g. M.Phil Mathematics)")
+    new_date = st.date_input("Lesson Date")
+    new_time = st.time_input("Lesson Time")
+    
+    # Professional payment display
+    st.markdown("---")
+    st.markdown("### 💳 Payment Instructions")
+    st.info(f"""
+    **1. Send Fee:** Rs. 1000 per lesson  
+    **2. EasyPaisa / JazzCash:** `0336-9972158`  
+    **3. Account Name:** Seyab Khan  
+    
+    *Please send the payment first, then enter the Transaction ID below to complete your booking.*
+    """)
+    
+    transaction_id = st.text_input("Enter Transaction ID (TID)")
+    
+    if st.form_submit_button("Submit Booking & Payment"):
+        if not transaction_id or len(transaction_id) < 5:
+            st.error("❌ Please enter a valid Transaction ID to complete your booking.")
+        elif not new_subject:
+            st.error("❌ Please enter a subject.")
+        else:
+            try:
+                new_booking = models.Booking(
+                    subject=new_subject,
+                    lesson_date=str(new_date),
+                    lesson_time=str(new_time),
+                    status="Pending",
+                    student_phone=st.session_state["user_phone"],
+                    tid=transaction_id  # Saving the payment proof
+                )
+                db.add(new_booking)
+                db.commit()
+                st.success("✅ Booking Sent! I will confirm your lesson once the payment is verified.")
+            except Exception as e:
+                st.error("⚠️ Database Error. Please contact support.")
+                db.rollback()
 
 # Close the database session at the end of the script
 db.close()
