@@ -17,6 +17,10 @@ if "user_id" not in st.session_state:
     st.session_state["role"] = None
     st.session_state["user_phone"] = None
     st.session_state["user_name"] = None
+    
+    # Variables for the 2-Step OTP Registration Flow
+    st.session_state["signup_step"] = 1 
+    st.session_state["temp_reg_data"] = {} 
 
 # Open database session for this page load
 db = SessionLocal()
@@ -77,6 +81,7 @@ if st.session_state["user_id"] is None:
         st.markdown("<h2 style='text-align: center; color: #001e00;'>📚 Bannu Tutoring</h2>", unsafe_allow_html=True)
         st.write("")
         
+        # --- LOGIN FLOW ---
         if choice == "Login":
             st.markdown("<h4 style='text-align: center;'>Log in to your account</h4>", unsafe_allow_html=True)
             login_role = st.radio("I am a:", ["student", "tutor"], horizontal=True)
@@ -98,6 +103,11 @@ if st.session_state["user_id"] is None:
                         st.session_state["role"] = user.role
                         st.session_state["user_phone"] = user.phone_number
                         st.session_state["user_name"] = user.full_name
+                        
+                        # Reset signup flow just in case
+                        st.session_state["signup_step"] = 1
+                        st.session_state["temp_reg_data"] = {}
+                        
                         st.success("Login Successful!")
                         st.rerun()
                     else:
@@ -108,31 +118,68 @@ if st.session_state["user_id"] is None:
             st.button("🍎 Continue with Apple", use_container_width=True)
             st.markdown("<p style='text-align: center; color: #656565; margin-top: 15px;'>Use the sidebar to Sign Up</p>", unsafe_allow_html=True)
 
+        # --- REGISTRATION FLOW (2-STEP) ---
         else:
             st.markdown("<h4 style='text-align: center;'>Create an Account</h4>", unsafe_allow_html=True)
-            reg_role = st.radio("Register as:", ["student", "tutor"], horizontal=True)
             
-            with st.form("reg_form"):
-                new_name = st.text_input("Full Name", label_visibility="collapsed", placeholder="👤 Full Name")
-                new_phone = st.text_input("Phone Number", label_visibility="collapsed", placeholder="📱 Phone Number")
-                new_pw = st.text_input("Set Password", type="password", label_visibility="collapsed", placeholder="🔒 Set Password")
+            # STEP 1: ENTER DETAILS
+            if st.session_state["signup_step"] == 1:
+                reg_role = st.radio("Register as:", ["student", "tutor"], horizontal=True)
                 
-                if st.form_submit_button("Sign Up", type="primary", use_container_width=True):
-                    existing_user = db.query(models.User).filter(models.User.phone_number == new_phone).first()
+                with st.form("reg_form"):
+                    new_name = st.text_input("Full Name", label_visibility="collapsed", placeholder="👤 Full Name")
+                    new_phone = st.text_input("Phone/Email", label_visibility="collapsed", placeholder="📱 Phone Number or Email")
+                    new_pw = st.text_input("Set Password", type="password", label_visibility="collapsed", placeholder="🔒 Set Password")
                     
-                    if existing_user:
-                        st.error("Registration failed. That phone number is already taken.")
-                    else:
-                        hashed_pw = pwd_context.hash(new_pw)
-                        new_user = models.User(
-                            full_name=new_name, 
-                            phone_number=new_phone, 
-                            hashed_password=hashed_pw, 
-                            role=reg_role
-                        )
-                        db.add(new_user)
-                        db.commit()
-                        st.success("✅ Account created! Switch to 'Login' in the sidebar to enter.")
+                    if st.form_submit_button("Send Security Code", type="primary", use_container_width=True):
+                        existing_user = db.query(models.User).filter(models.User.phone_number == new_phone).first()
+                        
+                        if existing_user:
+                            st.error("Registration failed. That phone/email is already taken.")
+                        elif not new_phone or not new_pw or len(new_pw) < 4:
+                            st.error("Please fill in all fields (password must be 4+ chars).")
+                        else:
+                            # Save data temporarily and move to Step 2
+                            st.session_state["temp_reg_data"] = {
+                                "name": new_name,
+                                "phone": new_phone,
+                                "pw": new_pw,
+                                "role": reg_role
+                            }
+                            st.session_state["signup_step"] = 2
+                            st.rerun()
+
+            # STEP 2: VERIFY OTP
+            elif st.session_state["signup_step"] == 2:
+                st.info(f"📲 We have sent a code to **{st.session_state['temp_reg_data']['phone']}**")
+                st.success("*(For testing: The security code is **123456**)*")
+                
+                with st.form("otp_form"):
+                    entered_otp = st.text_input("Enter 6-Digit Security Code", max_chars=6)
+                    
+                    if st.form_submit_button("Verify & Create Account", type="primary", use_container_width=True):
+                        
+                        if entered_otp == "123456":
+                            hashed_pw = pwd_context.hash(st.session_state["temp_reg_data"]["pw"])
+                            new_user = models.User(
+                                full_name=st.session_state["temp_reg_data"]["name"], 
+                                phone_number=st.session_state["temp_reg_data"]["phone"], 
+                                hashed_password=hashed_pw, 
+                                role=st.session_state["temp_reg_data"]["role"]
+                            )
+                            db.add(new_user)
+                            db.commit()
+                            
+                            st.session_state["signup_step"] = 1
+                            st.session_state["temp_reg_data"] = {}
+                            st.success("✅ Account created! Switch to 'Login' in the sidebar to enter.")
+                            
+                        else:
+                            st.error("❌ Incorrect code. Please try again.")
+                
+                if st.button("← Back to edit details"):
+                    st.session_state["signup_step"] = 1
+                    st.rerun()
 
 # -----------------------------------------
 # SCREEN 2: THE DASHBOARDS (Logged In)
@@ -152,6 +199,8 @@ else:
             st.session_state["role"] = None
             st.session_state["user_phone"] = None
             st.session_state["user_name"] = None
+            st.session_state["signup_step"] = 1
+            st.session_state["temp_reg_data"] = {}
             st.rerun()
 
     current_user = db.query(models.User).filter(models.User.id == st.session_state["user_id"]).first()
@@ -258,7 +307,6 @@ else:
             
             st.divider()
             
-            # --- FIXED INDENTATION: BOOKING FORM ---
             st.subheader("📝 Request Lesson & Pay")
             with st.form("booking_form"):
                 new_subject = st.text_input("Subject (e.g. M.Phil Mathematics)")
